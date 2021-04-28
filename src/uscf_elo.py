@@ -5,17 +5,19 @@ from collections import Counter
 
 class Player:
 
-    def __init__(self, rating, nr_games_played, nr_wins, nr_losses, Nr=0):
+    def __init__(self, rating, nr_games_played, nr_wins, nr_losses, birth_date=date(1990, 1, 1), tournament_end_date=date(2021, 1, 1), Nr=0):
         self.nr_games_played = nr_games_played
         self.nr_wins = nr_wins
         self.nr_losses = nr_losses
         self.rating = rating
+        self.birth_date = birth_date
+        self.tournament_end_date = tournament_end_date
         self.Nr = Nr
         self.initial_rating = self.initialize_rating()
         self.effective_nr_games = self.compute_effective_nr_games()
 
-    def compute_age_based_rating(self, birth_date=date(1990, 1, 1), tournament_end_date=date(2021, 1, 1)):
-        age = (tournament_end_date - birth_date).days/365.25
+    def compute_age_based_rating(self):
+        age = (self.tournament_end_date - self.birth_date).days/365.25
         if age < 2:
             rating = 100
         elif 2 <= age <= 26:
@@ -35,7 +37,6 @@ class Player:
         if self.initial_rating <= 2355:
             n = 50/np.sqrt(0.662 + 0.00000739*(2569 -
                            self.initial_rating)**2)
-            print(n)
         else:
             n = 50
 
