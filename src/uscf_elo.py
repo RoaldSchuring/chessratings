@@ -240,7 +240,7 @@ class Player:
 
             K = self.compute_standard_rating_K(self.player.initial_rating)
 
-            opponent_ids = [i[0] for i in tournament_results]
+            opponent_ids = [i[0] for i in self.tournament_results]
             max_nr_games_one_opponent = max(Counter(opponent_ids).values())
 
             # note - still need to add in logic specifying that player should not be competing against same player more than twice for this to apply
