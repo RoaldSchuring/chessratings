@@ -53,7 +53,7 @@ def test_initialize_rating(new_player):
 # test the effective number of games calculation for a range of different scenarios
 @pytest.mark.parametrize("rating, games_played, expected", [
     (900, 0, 0),
-    (1300, 10, 10),
+    (1200, 10, 10),
     (1300, 20, 14),
     (2400, 40, 40),
     (2400, 60, 50)
@@ -65,3 +65,57 @@ def test_compute_effective_nr_games(test_player, rating, games_played, expected)
     effective_nr_games = test_player.compute_effective_nr_games()
     effective_nr_games_truncated = int(effective_nr_games)
     assert effective_nr_games_truncated == expected
+
+
+# test the categorization function tht assigns a rating type to each player
+@pytest.mark.parametrize("games_played, wins, losses, expected", [
+    (6, 0, 5, 'special-new'),
+    (9, 9, 0, 'special-only-wins'),
+    (9, 0, 9, 'special-only-losses'),
+    (10, 7, 1, 'standard')
+])
+def test_rating_type(test_player, games_played, wins, losses, expected):
+    test_player.nr_games_played = games_played
+    test_player.nr_wins = wins
+    test_player.nr_losses = losses
+    rating_type = test_player.compute_rating_type()
+    assert rating_type == expected
+
+
+# test whether the total tournament score is being calculated correctly in the test tournament we created
+def test_tournament_score(test_tournament):
+    assert test_tournament.tournament_score == 3
+
+
+# test the PWE calculation that is part of the special rating procedure
+@pytest.mark.parametrize("rating, opponent_rating, expected", [
+    (1200, 1800, 0),
+    (1200, 1200, 0.5),
+    (1800, 1200, 1)
+])
+def test_compute_pwe(test_tournament, rating, opponent_rating, expected):
+    pwe = test_tournament.compute_pwe(rating, opponent_rating)
+    assert pwe == expected
+
+
+# test the initial rating and score calculation for the tournament
+@pytest.mark.parametrize("rating_type, expected_initial_rating, expected_score", [
+    ('special-new', 1200, 8),
+    ('special-only-wins', 800, 13),
+    ('special-only-losses', 1600, 3),
+    ('standard', 1200, 8)
+])
+def test_adjusted_initial_rating_and_score(test_player, test_tournament, rating_type, expected_initial_rating, expected_score):
+    test_player.rating_type = rating_type
+    test_tournament.player = test_player
+    adjusted_initial_rating, adjusted_score = test_tournament.compute_adjusted_initial_rating_and_score()
+    assert adjusted_initial_rating == expected_initial_rating
+    assert adjusted_score == expected_score
+
+
+# test the special rating objective function. for a special rating estimate of 1200 we should see an output of -0.375 for the objective fn
+def test_special_rating_objective(test_tournament):
+    special_rating_estimate = 1200
+    objective_fn = test_tournament.special_rating_objective(
+        special_rating_estimate)
+    assert objective_fn == -0.375

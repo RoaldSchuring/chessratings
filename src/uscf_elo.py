@@ -15,6 +15,7 @@ class Player:
         self.Nr = Nr
         self.initial_rating = self.initialize_rating()
         self.effective_nr_games = self.compute_effective_nr_games()
+        self.rating_type = self.compute_rating_type()
 
     def compute_age_based_rating(self):
         age = (self.tournament_end_date - self.birth_date).days/365.25
@@ -43,6 +44,17 @@ class Player:
         effective_nr_games = min(n, self.nr_games_played)
         return effective_nr_games
 
+    def compute_rating_type(self):
+        if self.nr_games_played <= 8:
+            rating_type = 'special-new'
+        elif self.nr_wins == self.nr_games_played:
+            rating_type = 'special-only-wins'
+        elif self.nr_losses == self.nr_games_played:
+            rating_type = 'special-only-losses'
+        else:
+            rating_type = 'standard'
+        return rating_type
+
     def create_tournament(self, tournament_results):
         return self.Tournament(self, tournament_results)
 
@@ -61,19 +73,7 @@ class Player:
             self.tournament_results = tournament_results
             self.time_control_main_time = time_control_main_time
             self.time_control_increment = time_control_increment
-            self.rating_type = self.compute_rating_type()
             self.adjusted_initial_rating, self.adjusted_score = self.compute_adjusted_initial_rating_and_score()
-
-        def compute_rating_type(self):
-            if self.player.nr_games_played <= 8:
-                rating_type = 'special-new'
-            elif self.player.nr_wins == self.player.nr_games_played:
-                rating_type == 'special-only-wins'
-            elif self.player.nr_losses == self.player.nr_games_played:
-                rating_type = 'special-only-losses'
-            else:
-                rating_type = 'standard'
-            return rating_type
 
         def compute_pwe(self, player_rating, opponent_rating):
             if player_rating <= opponent_rating - 400:
@@ -90,10 +90,10 @@ class Player:
 
             # tournament results must be structured as a list of tuples (rating, opponent_rating, result)
 
-            if self.rating_type == 'special-only-wins':
+            if self.player.rating_type == 'special-only-wins':
                 adjusted_initial_rating = self.player.initial_rating - 400
                 adjusted_score = self.tournament_score + self.player.effective_nr_games
-            elif self.rating_type == 'special-only-losses':
+            elif self.player.rating_type == 'special-only-losses':
                 adjusted_initial_rating = self.player.initial_rating + 400
                 adjusted_score = self.tournament_score
             else:
@@ -227,8 +227,6 @@ class Player:
                     K = 200/(self.player.effective_nr_games +
                              self.nr_games_tournament)
 
-                    # self.rating_type = self.compute_rating_type()
-            print(K)
             return K
 
         def compute_standard_winning_expectancy(self, rating, opponent_rating):
@@ -279,7 +277,7 @@ class Player:
 
         def update_rating(self):
 
-            if self.rating_type == 'standard':
+            if self.player.rating_type == 'standard':
                 updated_rating = self.compute_standard_rating()
             else:
                 updated_rating = self.compute_special_rating()
