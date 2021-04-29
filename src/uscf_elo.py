@@ -122,22 +122,29 @@ class Player:
                 za = max([z for z in Sz if z < M])
                 f_za = self.special_rating_objective(za)
 
+                print(za, f_za)
+
                 if abs(f_M - f_za) < self.epsilon_special_rating:
                     M = za
                     f_M = f_za
+                    print('if 1,', M, f_M)
                     continue
                 else:
                     M_star = M - f_M * ((M - za) / (f_M - f_za))
+                    print('M_star', M_star)
                     if M_star < za:
                         M = za
                         f_M = f_za
+                        print('step 2', M, f_M)
                         continue
                     elif za <= M_star < M:
                         M = M_star
                         f_M = self.special_rating_objective(M_star)
+                        print('step 3', M, f_M)
                         continue
                     else:
                         step_2_satisfied = True
+                        print('final', M, f_M)
                         break
             return M, f_M
 
@@ -147,7 +154,6 @@ class Player:
 
                 zb = min([z for z in Sz if z > M])
                 f_zb = self.special_rating_objective(zb)
-
                 if abs(f_zb - f_M) < self.epsilon_special_rating:
                     M = zb
                     f_M = f_zb
@@ -155,17 +161,19 @@ class Player:
                     M_star = M - f_M * ((zb - M) / (f_zb - f_M))
                     if M_star > zb:
                         M = zb
+                        f_M = self.special_rating_objective(M)
                         continue
                     elif M < M_star <= zb:
                         M = M_star
-                        f_M = self.special_rating_objective(M_star)
+                        f_M = self.special_rating_objective(M)
                         continue
                     else:
                         step_3_satisfied = True
                         return M, f_M
 
         def special_rating_step_4(self, f_M, opponent_ratings, M, Sz):
-            if abs(f_M) < -self.epsilon_special_rating:
+            p = 0
+            if abs(f_M) < self.epsilon_special_rating:
                 p = len([o for o in opponent_ratings if abs(M - o) <= 400])
             if abs(M - self.adjusted_initial_rating) <= 400:
                 p += 1
@@ -187,19 +195,29 @@ class Player:
             M = min(2700, M)
             return M
 
+        def compute_M(self, effective_nr_games, initial_rating, opponent_ratings, tournament_score, tournament_games):
+            M = (effective_nr_games*initial_rating + sum(opponent_ratings) + 400 *
+                 (2*tournament_score - tournament_games))/(effective_nr_games + tournament_games)
+            return M
+
+        def compute_Sz(self, opponent_ratings):
+            Sz = [o + 400 for o in opponent_ratings] + \
+                [o - 400 for o in opponent_ratings]
+            return Sz
+
         def compute_special_rating(self):
 
             tournament_games = len(self.tournament_results)
             tournament_score = sum([t[2] for t in self.tournament_results])
             opponent_ratings = [r[1] for r in self.tournament_results]
 
-            M = (self.player.effective_nr_games*self.player.initial_rating + sum(opponent_ratings) + 400 *
-                 (2*tournament_score - tournament_games))/(self.player.effective_nr_games + tournament_games)
+            M = self.compute_M(self.player.effective_nr_games, self.player.initial_rating,
+                               opponent_ratings, tournament_score, tournament_games)
 
             f_M = self.special_rating_objective(M)
+            Sz = self.compute_Sz(opponent_ratings)
 
-            Sz = [o + 400 for o in opponent_ratings] + \
-                [o - 400 for o in opponent_ratings]
+            print(M, f_M, Sz)
 
             if f_M > self.epsilon_special_rating:
                 M, f_M = self.special_rating_step_2(M, f_M, Sz)
@@ -207,10 +225,11 @@ class Player:
             if f_M < -self.epsilon_special_rating:
                 M, f_M = self.special_rating_step_3(M, f_M, Sz)
 
-            if abs(f_M) < -self.epsilon_special_rating:
+            if abs(f_M) < self.epsilon_special_rating:
                 M = self.special_rating_step_4(f_M, opponent_ratings, M, Sz)
+                print(M)
                 M = min(2700, M)
-
+                print(M)
                 return M
 
         def compute_standard_rating_K(self, rating):

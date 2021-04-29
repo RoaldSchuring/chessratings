@@ -2,8 +2,6 @@ import pytest
 from datetime import date
 from uscf_elo import Player
 
-test_player_rating = 1200
-
 
 @pytest.fixture
 def test_player():
@@ -21,10 +19,8 @@ def new_player():
 
 
 @pytest.fixture
-def test_tournament():
+def test_tournament(test_player):
     '''returns a test tournament with 6 games against 3 players'''
-    test_player = Player(rating=1200, nr_games_played=10,
-                         nr_wins=8, nr_losses=1)
     tournament_results = [('opponent_1', 1300, 1), ('opponent_2', 1250, 0.5), ('opponent_3',
                                                                                1200, 0), ('opponent_3', 1200, 0.5), ('opponent_2', 1250, 0), ('opponent_1', 1300, 1)]
     tournament = test_player.Tournament(test_player, tournament_results)
@@ -119,3 +115,57 @@ def test_special_rating_objective(test_tournament):
     objective_fn = test_tournament.special_rating_objective(
         special_rating_estimate)
     assert objective_fn == -0.375
+
+
+def test_compute_M(test_player, test_tournament):
+    tournament_games = len(test_tournament.tournament_results)
+    opponent_ratings = [r[1] for r in test_tournament.tournament_results]
+    M = test_tournament.compute_M(test_player.effective_nr_games, test_player.initial_rating,
+                                  opponent_ratings, test_tournament.tournament_score, tournament_games)
+    assert M == 1218.75
+
+
+def test_compute_Sz(test_tournament):
+    opponent_ratings = [r[1] for r in test_tournament.tournament_results]
+    Sz = test_tournament.compute_Sz(opponent_ratings)
+    assert Sz == [1700, 1650, 1600, 1600, 1650,
+                  1700, 900, 850, 800, 800, 850, 900]
+
+
+# test the second step of the function to calculate the special rating. these test values have been calibrated to go through all the iterative steps of the function.
+@pytest.mark.parametrize("M, f_M, Sz, expected_M, expected_f_M", [
+    (1230, -0.394999999999, [1199, 1201,
+     1203, 1250, 1150, 1104], 1203, -0.3149999)
+])
+def test_special_rating_step_2(test_tournament, M, f_M, Sz, expected_M, expected_f_M):
+    M, f_M = test_tournament.special_rating_step_2(M, f_M, Sz)
+    assert abs(M - expected_M) < 0.1
+    assert abs(f_M - expected_f_M) < 0.001
+
+
+# test the third step of the function to calculate the special rating. these test values have been calibrated to go through all the iterative steps of the function.
+@pytest.mark.parametrize("M, f_M, Sz, expected_M, expected_f_M", [
+    (1218.75, -0.375, [1700, 1650, 1600, 1600, 1650,
+     1700, 900, 850, 800, 800, 850, 900], 1236.6, 0.357),
+    (1200, -0.355, [1199, 1201, 1203, 1250], 1218.75, 0)
+])
+def test_special_rating_step_3(test_tournament, M, f_M, Sz, expected_M, expected_f_M):
+    M, f_M = test_tournament.special_rating_step_3(M, f_M, Sz)
+    assert abs(M - expected_M) < 0.1
+    assert abs(f_M - expected_f_M) < 0.001
+
+
+# test the fourth step of the function to calculate the special rating. these test values have been calibrated to go through all the iterative steps of the function.
+@pytest.mark.parametrize("f_M, M, opponent_ratings, expected_M", [
+    (0, 1300, [1000, 1200, 1400], 1300),
+    (1, 1800, [1800, 1750, 900, 1100], 1500)
+])
+def test_special_rating_step_4(test_tournament, f_M, M, opponent_ratings, expected_M):
+    Sz = test_tournament.compute_Sz(opponent_ratings)
+    M = test_tournament.special_rating_step_4(f_M, opponent_ratings, M, Sz)
+    assert abs(M - expected_M) < 0.1
+
+
+def test_compute_special_rating(test_tournament):
+    M = test_tournament.compute_special_rating()
+    assert abs(M - 1218.75) < 0.1
