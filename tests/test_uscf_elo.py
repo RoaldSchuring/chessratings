@@ -19,11 +19,20 @@ def new_player():
 
 
 @pytest.fixture
-def test_tournament(test_player):
+def tournament_test_player(test_player):
     '''returns a test tournament with 6 games against 3 players'''
     tournament_results = [('opponent_1', 1300, 1), ('opponent_2', 1250, 0.5), ('opponent_3',
                                                                                1200, 0), ('opponent_3', 1200, 0.5), ('opponent_2', 1250, 0), ('opponent_1', 1300, 1)]
     tournament = test_player.Tournament(test_player, tournament_results)
+    return tournament
+
+
+@pytest.fixture
+def tournament_new_player(new_player):
+    '''returns a test tournament with 6 games against 3 players'''
+    tournament_results = [('opponent_1', 900, 0), ('opponent_2', 800, 0.5), ('opponent_3',
+                                                                             1200, 0), ('opponent_3', 1200, 0.5), ('opponent_2', 600, 1), ('opponent_1', 750, 0.5)]
+    tournament = new_player.Tournament(new_player, tournament_results)
     return tournament
 
 
@@ -41,9 +50,18 @@ def test_age_based_rating(test_player, birth_year, tournament_year, expected):
 
 
 # test the rating initialization function for a new player (for whom rating will be initialized based on age)
-def test_initialize_rating(new_player):
-    initialized_rating = new_player.initialize_rating()
-    assert initialized_rating == 1300
+def test_initialize_rating(new_player, test_player):
+    initialized_rating_new_player = new_player.initialize_rating()
+    initialized_rating_test_player = test_player.initialize_rating()
+    assert initialized_rating_new_player == 1300
+    assert initialized_rating_test_player == 1200
+
+
+def test_determine_established_rating(new_player, test_player):
+    established_rating_new_player = new_player.determine_established_rating()
+    established_rating_test_player = test_player.determine_established_rating()
+    assert established_rating_new_player is False
+    assert established_rating_test_player is False
 
 
 # test the effective number of games calculation for a range of different scenarios
@@ -79,8 +97,9 @@ def test_rating_type(test_player, games_played, wins, losses, expected):
 
 
 # test whether the total tournament score is being calculated correctly in the test tournament we created
-def test_tournament_score(test_tournament):
-    assert test_tournament.tournament_score == 3
+def tournament_test_player_score(tournament_test_player, tournament_new_player):
+    assert tournament_test_player.tournament_score == 3
+    assert tournament_new_player.tournament_score == 2.5
 
 
 # test the PWE calculation that is part of the special rating procedure
@@ -89,8 +108,8 @@ def test_tournament_score(test_tournament):
     (1200, 1200, 0.5),
     (1800, 1200, 1)
 ])
-def test_compute_pwe(test_tournament, rating, opponent_rating, expected):
-    pwe = test_tournament.compute_pwe(rating, opponent_rating)
+def test_compute_pwe(tournament_test_player, rating, opponent_rating, expected):
+    pwe = tournament_test_player.compute_pwe(rating, opponent_rating)
     assert pwe == expected
 
 
@@ -101,33 +120,35 @@ def test_compute_pwe(test_tournament, rating, opponent_rating, expected):
     ('special-only-losses', 1600, 3),
     ('standard', 1200, 8)
 ])
-def test_adjusted_initial_rating_and_score(test_player, test_tournament, rating_type, expected_initial_rating, expected_score):
+def test_adjusted_initial_rating_and_score(test_player, tournament_test_player, rating_type, expected_initial_rating, expected_score):
     test_player.rating_type = rating_type
-    test_tournament.player = test_player
-    adjusted_initial_rating, adjusted_score = test_tournament.compute_adjusted_initial_rating_and_score()
+    tournament_test_player.player = test_player
+    adjusted_initial_rating, adjusted_score = tournament_test_player.compute_adjusted_initial_rating_and_score()
     assert adjusted_initial_rating == expected_initial_rating
     assert adjusted_score == expected_score
 
 
 # test the special rating objective function. for a special rating estimate of 1200 we should see an output of -0.375 for the objective fn
-def test_special_rating_objective(test_tournament):
+def test_special_rating_objective(tournament_test_player):
     special_rating_estimate = 1200
-    objective_fn = test_tournament.special_rating_objective(
+    objective_fn = tournament_test_player.special_rating_objective(
         special_rating_estimate)
     assert objective_fn == -0.375
 
 
-def test_compute_M(test_player, test_tournament):
-    tournament_games = len(test_tournament.tournament_results)
-    opponent_ratings = [r[1] for r in test_tournament.tournament_results]
-    M = test_tournament.compute_M(test_player.effective_nr_games, test_player.initial_rating,
-                                  opponent_ratings, test_tournament.tournament_score, tournament_games)
+def test_compute_M(test_player, tournament_test_player):
+    tournament_games = len(tournament_test_player.tournament_results)
+    opponent_ratings = [r[1]
+                        for r in tournament_test_player.tournament_results]
+    M = tournament_test_player.compute_M(test_player.effective_nr_games, test_player.initial_rating,
+                                         opponent_ratings, tournament_test_player.tournament_score, tournament_games)
     assert M == 1218.75
 
 
-def test_compute_Sz(test_tournament):
-    opponent_ratings = [r[1] for r in test_tournament.tournament_results]
-    Sz = test_tournament.compute_Sz(opponent_ratings)
+def test_compute_Sz(tournament_test_player):
+    opponent_ratings = [r[1]
+                        for r in tournament_test_player.tournament_results]
+    Sz = tournament_test_player.compute_Sz(opponent_ratings)
     assert Sz == [1700, 1650, 1600, 1600, 1650,
                   1700, 900, 850, 800, 800, 850, 900]
 
@@ -137,8 +158,8 @@ def test_compute_Sz(test_tournament):
     (1230, -0.394999999999, [1199, 1201,
      1203, 1250, 1150, 1104], 1203, -0.3149999)
 ])
-def test_special_rating_step_2(test_tournament, M, f_M, Sz, expected_M, expected_f_M):
-    M, f_M = test_tournament.special_rating_step_2(M, f_M, Sz)
+def test_special_rating_step_2(tournament_test_player, M, f_M, Sz, expected_M, expected_f_M):
+    M, f_M = tournament_test_player.special_rating_step_2(M, f_M, Sz)
     assert abs(M - expected_M) < 0.1
     assert abs(f_M - expected_f_M) < 0.001
 
@@ -149,8 +170,8 @@ def test_special_rating_step_2(test_tournament, M, f_M, Sz, expected_M, expected
      1700, 900, 850, 800, 800, 850, 900], 1236.6, 0.357),
     (1200, -0.355, [1199, 1201, 1203, 1250], 1218.75, 0)
 ])
-def test_special_rating_step_3(test_tournament, M, f_M, Sz, expected_M, expected_f_M):
-    M, f_M = test_tournament.special_rating_step_3(M, f_M, Sz)
+def test_special_rating_step_3(tournament_test_player, M, f_M, Sz, expected_M, expected_f_M):
+    M, f_M = tournament_test_player.special_rating_step_3(M, f_M, Sz)
     assert abs(M - expected_M) < 0.1
     assert abs(f_M - expected_f_M) < 0.001
 
@@ -160,12 +181,48 @@ def test_special_rating_step_3(test_tournament, M, f_M, Sz, expected_M, expected
     (0, 1300, [1000, 1200, 1400], 1300),
     (1, 1800, [1800, 1750, 900, 1100], 1500)
 ])
-def test_special_rating_step_4(test_tournament, f_M, M, opponent_ratings, expected_M):
-    Sz = test_tournament.compute_Sz(opponent_ratings)
-    M = test_tournament.special_rating_step_4(f_M, opponent_ratings, M, Sz)
+def test_special_rating_step_4(tournament_test_player, f_M, M, opponent_ratings, expected_M):
+    Sz = tournament_test_player.compute_Sz(opponent_ratings)
+    M = tournament_test_player.special_rating_step_4(
+        f_M, opponent_ratings, M, Sz)
     assert abs(M - expected_M) < 0.1
 
 
-def test_compute_special_rating(test_tournament):
-    M = test_tournament.compute_special_rating()
+# test the overall computation of the special rating for the test tournament
+def test_compute_special_rating(tournament_test_player):
+    M = tournament_test_player.compute_special_rating()
     assert abs(M - 1218.75) < 0.1
+
+
+@pytest.mark.parametrize("rating, time_control_minutes, time_control_increment_seconds, effective_nr_games, nr_games_tournament, expected", [
+    (1200, 60, 0, 40, 10, 16),
+    (2300, 60, 0, 40, 10, 12),
+    (2600, 60, 0, 40, 10, 4)
+])
+def test_compute_standard_rating_K(tournament_test_player, rating, time_control_minutes, time_control_increment_seconds, effective_nr_games, nr_games_tournament, expected):
+    K = tournament_test_player.compute_standard_rating_K(
+        rating, time_control_minutes, time_control_increment_seconds, effective_nr_games, nr_games_tournament)
+    assert K == expected
+
+
+def test_compute_standard_winning_expectancy(tournament_test_player):
+    winning_expectancy = tournament_test_player.compute_standard_winning_expectancy(
+        1500, 1400)
+    assert abs(winning_expectancy - 0.64) < 0.01
+
+
+def test_compute_standard_rating(tournament_test_player):
+    rating_new = tournament_test_player.compute_standard_rating()
+    assert abs(rating_new - 1221) < 1
+
+
+def test_compute_rating_floor(tournament_test_player):
+    rating_floor = tournament_test_player.compute_rating_floor()
+    assert rating_floor == 135
+
+
+def test_update_rating(tournament_test_player, tournament_new_player):
+    updated_rating_test_player = tournament_test_player.update_rating()
+    updated_rating_new_player = tournament_new_player.update_rating()
+    assert abs(updated_rating_test_player - 1221) < 1
+    assert abs(updated_rating_new_player - 841) < 1

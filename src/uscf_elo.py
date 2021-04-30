@@ -2,6 +2,10 @@ import numpy as np
 from datetime import date
 from collections import Counter
 
+'''
+This package is an implementation of the US Chess Federation (USCF) rating system for Over-The-Board (OTB) events. Details can be found here: http://www.glicko.net/ratings/rating.system.pdf
+'''
+
 
 class Player:
 
@@ -14,8 +18,16 @@ class Player:
         self.tournament_end_date = tournament_end_date
         self.Nr = Nr
         self.initial_rating = self.initialize_rating()
+        self.established_rating = self.determine_established_rating()
         self.effective_nr_games = self.compute_effective_nr_games()
         self.rating_type = self.compute_rating_type()
+
+    def determine_established_rating(self):
+        if self.nr_games_played > 25:
+            established_rating = True
+        else:
+            established_rating = False
+        return established_rating
 
     def compute_age_based_rating(self):
         age = (self.tournament_end_date - self.birth_date).days/365.25
@@ -66,13 +78,13 @@ class Player:
 
         # Note: tournament_results needs to be in a specific format: a list of tuples/lists, each representing one match and containing (opponent_id, opponent_rating, score), where score is 1 for a win, 0.5 for a draw and 0 for a loss
 
-        def __init__(self, player, tournament_results, time_control_main_time=60, time_control_increment=0):
+        def __init__(self, player, tournament_results, time_control_minutes=60, time_control_increment_seconds=0):
             self.player = player
             self.nr_games_tournament = len(tournament_results)
             self.tournament_score = sum([i[2] for i in tournament_results])
             self.tournament_results = tournament_results
-            self.time_control_main_time = time_control_main_time
-            self.time_control_increment = time_control_increment
+            self.time_control_minutes = time_control_minutes
+            self.time_control_increment_seconds = time_control_increment_seconds
             self.adjusted_initial_rating, self.adjusted_score = self.compute_adjusted_initial_rating_and_score()
 
         def compute_pwe(self, player_rating, opponent_rating):
@@ -217,8 +229,6 @@ class Player:
             f_M = self.special_rating_objective(M)
             Sz = self.compute_Sz(opponent_ratings)
 
-            print(M, f_M, Sz)
-
             if f_M > self.epsilon_special_rating:
                 M, f_M = self.special_rating_step_2(M, f_M, Sz)
 
@@ -227,25 +237,20 @@ class Player:
 
             if abs(f_M) < self.epsilon_special_rating:
                 M = self.special_rating_step_4(f_M, opponent_ratings, M, Sz)
-                print(M)
                 M = min(2700, M)
-                print(M)
                 return M
 
-        def compute_standard_rating_K(self, rating):
+        def compute_standard_rating_K(self, rating, time_control_minutes, time_control_increment_seconds, effective_nr_games, nr_games_tournament):
 
-            K = 800/(self.player.effective_nr_games + self.nr_games_tournament)
-            print('K', K)
+            K = 800/(effective_nr_games + nr_games_tournament)
 
-            if 30 >= (self.time_control_main_time + self.time_control_increment) >= 65 and rating > 2200:
+            if 30 <= (time_control_minutes + time_control_increment_seconds) <= 65 and rating > 2200:
                 if rating < 2500:
-                    K = 800 * \
-                        (6.5 - 0.0025)/(self.player.effective_nr_games +
-                                        self.nr_games_tournament)
+                    K = (800 * (6.5 - 0.0025*rating))/(effective_nr_games +
+                                                       nr_games_tournament)
                 else:
-                    K = 200/(self.player.effective_nr_games +
-                             self.nr_games_tournament)
-
+                    K = 200/(effective_nr_games +
+                             nr_games_tournament)
             return K
 
         def compute_standard_winning_expectancy(self, rating, opponent_rating):
@@ -256,16 +261,18 @@ class Player:
             sum_swe = sum([self.compute_standard_winning_expectancy(
                 self.player.initial_rating, r[1]) for r in self.tournament_results])
 
-            K = self.compute_standard_rating_K(self.player.initial_rating)
+            K = self.compute_standard_rating_K(
+                self.player.initial_rating, self.time_control_minutes, self.time_control_increment_seconds, self.player.effective_nr_games, self.nr_games_tournament)
 
             opponent_ids = [i[0] for i in self.tournament_results]
             max_nr_games_one_opponent = max(Counter(opponent_ids).values())
 
-            # note - still need to add in logic specifying that player should not be competing against same player more than twice for this to apply
             if self.nr_games_tournament < 3 or max_nr_games_one_opponent > 2:
+
                 rating_new = self.player.initial_rating + \
                     K*(self.tournament_score - sum_swe)
             else:
+
                 rating_new = self.player.initial_rating + K*(self.tournament_score - sum_swe) + max(
                     0, K*(self.tournament_score - sum_swe) - self.B*np.sqrt(max(self.nr_games_tournament, 4)))
 
@@ -273,9 +280,11 @@ class Player:
 
         # after the tournament has been played, the rating cannot be lower than the rating floor. this function disregards OTB rating floor considerations for people with an original Life Master Title, or those people that win a large cash prize
         def compute_rating_floor(self):
+
             # number of total wins after the tournament
             Nw = self.player.nr_wins + \
                 len([i for i in self.tournament_results[2] if i == 1])
+
             # number of total draws after the tournament
             Nd = self.player.nr_games_played - self.player.nr_wins - self.player.nr_losses + \
                 len([i for i in self.tournament_results[2] if i == 0.5])
@@ -288,7 +297,7 @@ class Player:
                 self.absolute_rating_floor + 4*Nw + 2*Nd + self.player.Nr, 150)
 
             # a player with an established rating has a rating floor possibly higher than the absolute floor. Higher rating floors exists at 1200 - 2100
-            if self.player.initial_rating >= 1200:
+            if self.player.initial_rating >= 1200 and self.player.established_rating is True:
                 otb_absolute_rating_floor = int(
                     (self.player.initial_rating - 200) / 100)*100
 
@@ -319,7 +328,5 @@ class Player:
                     [t for t in self.tournament_results if t[2] == 1])
                 self.player.nr_losses += len(
                     [t for t in self.tournament_results if t[2] == 0])
-
-                # , self.player.nr_games_played, self.player.nr_wins, self.player.nr_losses
 
             return updated_rating_bounded
