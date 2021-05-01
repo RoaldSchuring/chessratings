@@ -4,7 +4,7 @@ with open("README.md", "r") as r:
     long_description = r.read()
 
 setup(
-    name='chess_ratings',
+    name='chessratings',
     version='0.0.1',
     description='Various chess rating systems',
     py_modules=['uscf_elo'],
@@ -12,7 +12,9 @@ setup(
     # classifiers=https://pypi.org/classifiers/,
     long_description=long_description,
     long_description_content_type="text/markdown",
-    # install_requires = [],
+    # install_requires = [
+    #     "numpy"
+    # ],
     extras_require={
         "dev": [
             "pytest>=3.7",
