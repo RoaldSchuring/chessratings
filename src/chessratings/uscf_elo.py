@@ -12,17 +12,22 @@ This package only implements partial logic for rating floors, disregarding ratin
 At this time, this package does not allow for updating USCF ratings based on results from foreign FIDE events.
 '''
 
+epsilon_special_rating = 10**-7
+absolute_rating_floor = 100
+B = 14
+
 
 class Player:
 
-    def __init__(self, rating, nr_games_played, nr_wins, nr_losses, birth_date=date(1990, 1, 1), tournament_end_date=date(2021, 1, 1), Nr=0):
+    def __init__(self, id, rating, nr_games_played, nr_wins, nr_losses, birth_date=date(1990, 1, 1), current_date=date(2021, 1, 1), Nr=0):
+        self.id = id
         self.nr_games_played = nr_games_played
         self.nr_wins = nr_wins
         self.nr_draws = nr_games_played - nr_wins - nr_losses
         self.nr_losses = nr_losses
         self.rating = rating
         self.birth_date = birth_date
-        self.tournament_end_date = tournament_end_date
+        self.current_date = current_date
         # Nr is the number of events (tournaments) in which a player completed three rated games
         self.Nr = Nr
         self.initialized_rating = self.initialize_rating()
@@ -31,6 +36,7 @@ class Player:
         self.rating_type = self.compute_rating_type()
 
     # players with > 25 games are deemed to have an 'established' rating
+
     def determine_established_rating(self):
         if self.nr_games_played > 25:
             established_rating = True
@@ -40,7 +46,7 @@ class Player:
 
     # age-based rating initialization for players that are unrated
     def _compute_age_based_rating(self):
-        age = (self.tournament_end_date - self.birth_date).days/365.25
+        age = (self.current_date - self.birth_date).days/365.25
         if age < 2:
             rating = 100
         elif 2 <= age <= 26:
@@ -80,293 +86,398 @@ class Player:
             rating_type = 'standard'
         return rating_type
 
-    def _create_tournament(self, tournament_results):
-        return self.Tournament(self, tournament_results)
 
-    class Tournament:
+class Tournament:
 
-        epsilon_special_rating = 10**-7
-        absolute_rating_floor = 100
-        B = 14
+    # Note: tournament_results needs to be in a specific format:
+    # [ [ ( player A ID, player B ID ), winner ID ], [ ( player B ID , player C ID ), winner ID ], ... ]
+    # winner is the ID of the player who won. If a draw, the value is null.
 
-        # Note: tournament_results needs to be in a specific format: a list of tuples/lists, each representing one match and containing (opponent_id, opponent_rating, score), where score is 1 for a win, 0.5 for a draw and 0 for a loss
+    def __init__(self, players, tournament_results, tournament_date=date.today(), time_control_minutes=60, time_control_increment_seconds=0):
 
-        def __init__(self, player, tournament_results, time_control_minutes=60, time_control_increment_seconds=0):
-            self.player = player
-            self.nr_games_tournament = len(tournament_results)
-            self.tournament_score = sum([i[2] for i in tournament_results])
-            self.tournament_results = tournament_results
-            self.time_control_minutes = time_control_minutes
-            self.time_control_increment_seconds = time_control_increment_seconds
-            self._adjusted_initialized_rating, self._adjusted_score = self._compute_adjusted_initialized_rating_and_score()
+        self.nr_games_tournament = len(tournament_results)
+        self.tournament_results = tournament_results
+        self.tournament_date = tournament_date
+        self.time_control_minutes = time_control_minutes
+        self.time_control_increment_seconds = time_control_increment_seconds
+        self.valid_tournament = self._valid_tournament()
+        self.individual_match = _individual_match(self.players)
+        if players is not None:
+            self.players = list(players)
+        else:
+            self.players = []
+        self.nr_players = len(self.players)
 
-        # the provisional winning expectancy for special ratings
-        def _compute_pwe(self, player_rating, opponent_rating):
-            if player_rating <= opponent_rating - 400:
-                pwe = 0
-            elif opponent_rating - 400 < player_rating < opponent_rating + 400:
-                pwe = 0.5 + (player_rating - opponent_rating)/800
+    def __iter___(self):
+        return iter(self.players)
+
+    # only tournaments that satisfy certain criteria are valid
+    def _valid_tournament(self):
+        if len(self.players) <= 1:
+            return False
+        elif self.individual_match:
+            player_1 = self.players[0]
+            player_2 = self.players[1]
+            if player_1.established is False or player_2.established is False or abs(player_1.initialized_rating - player_2.initialized_rating) <= 400:
+                return False
             else:
-                pwe = 1
+                return True
+        else:
+            return True
 
-            return pwe
+    def _compute_pwe(self, player_rating, opponent_rating):
+        if player_rating <= opponent_rating - 400:
+            pwe = 0
+        elif opponent_rating - 400 < player_rating < opponent_rating + 400:
+            pwe = 0.5 + (player_rating - opponent_rating)/800
+        else:
+            pwe = 1
 
-        # an adjusted initialized rating and adjusted score are used as variables to calculate the special rating
+        return pwe
 
-        def _compute_adjusted_initialized_rating_and_score(self):
+    # an adjusted initialized rating and adjusted score are used as variables to calculate the special rating
 
-            # players with <= 8 games, or players that have had only wins/losses in all previous rated games, get a special rating
-            if self.player.rating_type == 'special-only-wins':
-                adjusted_initialized_rating = self.player.initialized_rating - 400
-                adjusted_score = self.tournament_score + self.player.effective_nr_games
-            elif self.player.rating_type == 'special-only-losses':
-                adjusted_initialized_rating = self.player.initialized_rating + 400
-                adjusted_score = self.tournament_score
+    def _compute_adjusted_initialized_rating_and_score(self, player, tournament_score):
+
+        # players with <= 8 games, or players that have had only wins/losses in all previous rated games, get a special rating
+        if player.rating_type == 'special-only-wins':
+            adjusted_initialized_rating = player.initialized_rating - 400
+            adjusted_score = tournament_score + player.effective_nr_games
+        elif player.rating_type == 'special-only-losses':
+            adjusted_initialized_rating = player.initialized_rating + 400
+            adjusted_score = tournament_score
+        else:
+            adjusted_initialized_rating = player.initialized_rating
+            adjusted_score = tournament_score + player.effective_nr_games/2
+
+        return adjusted_initialized_rating, adjusted_score
+
+    # an objective function for the special rating. The goal is to determine the value of the special rating estimate (R) such that the value of this objecive is equal to 0 within reasonable tolerance
+
+    def _special_rating_objective(self, special_rating_estimate, tournament_results, effective_nr_games, adjusted_initialized_rating, adjusted_score):
+
+        sum_pwe = sum([self._compute_pwe(special_rating_estimate, t[1])
+                       for t in tournament_results])
+
+        objective_fn = effective_nr_games * \
+            self._compute_pwe(special_rating_estimate, adjusted_initialized_rating) + \
+            sum_pwe - adjusted_score
+
+        return objective_fn
+
+    # Sz is used in the iterative procedure to find the solution for the special rating objective function
+
+    def _compute_Sz(self, opponent_ratings):
+        Sz = [o + 400 for o in opponent_ratings] + \
+            [o - 400 for o in opponent_ratings]
+        return Sz
+
+    # the first step of the iterative algorithm - provides the first estimate of the special rating
+
+    def _special_rating_step_1_compute_M(self, effective_nr_games, initialized_rating, opponent_ratings, tournament_score, tournament_games):
+        M = (effective_nr_games*initialized_rating + sum(opponent_ratings) + 400 *
+             (2*tournament_score - tournament_games))/(effective_nr_games + tournament_games)
+        return M
+
+    # the second step of the iterative process to find the special rating
+
+    def _special_rating_step_2(self, M, f_M, Sz):
+        step_2_satisfied = False
+        while step_2_satisfied is False:
+
+            # Let za be the largest value in Sz for which M > za.
+            za = max([z for z in Sz if z < M])
+            f_za = self._special_rating_objective(za)
+
+            if abs(f_M - f_za) < self.epsilon_special_rating:
+                M = za
+                f_M = f_za
+                print('if 1,', M, f_M)
+                continue
             else:
-                adjusted_initialized_rating = self.player.initialized_rating
-                adjusted_score = self.tournament_score + self.player.effective_nr_games/2
-
-            return adjusted_initialized_rating, adjusted_score
-
-        # an objective function for the special rating. The goal is to determine the value of the special rating estimate (R) such that the value of this objecive is equal to 0 within reasonable tolerance
-
-        def _special_rating_objective(self, special_rating_estimate):
-
-            sum_pwe = sum([self._compute_pwe(special_rating_estimate, t[1])
-                          for t in self.tournament_results])
-
-            objective_fn = self.player.effective_nr_games * \
-                self._compute_pwe(special_rating_estimate, self._adjusted_initialized_rating) + \
-                sum_pwe - self._adjusted_score
-
-            return objective_fn
-
-        # Sz is used in the iterative procedure to find the solution for the special rating objective function
-
-        def _compute_Sz(self, opponent_ratings):
-            Sz = [o + 400 for o in opponent_ratings] + \
-                [o - 400 for o in opponent_ratings]
-            return Sz
-
-        # the first step of the iterative algorithm - provides the first estimate of the special rating
-
-        def _special_rating_step_1_compute_M(self, effective_nr_games, initialized_rating, opponent_ratings, tournament_score, tournament_games):
-            M = (effective_nr_games*initialized_rating + sum(opponent_ratings) + 400 *
-                 (2*tournament_score - tournament_games))/(effective_nr_games + tournament_games)
-            return M
-
-        # the second step of the iterative process to find the special rating
-
-        def _special_rating_step_2(self, M, f_M, Sz):
-            step_2_satisfied = False
-            while step_2_satisfied is False:
-
-                # Let za be the largest value in Sz for which M > za.
-                za = max([z for z in Sz if z < M])
-                f_za = self._special_rating_objective(za)
-
-                print(za, f_za)
-
-                if abs(f_M - f_za) < self.epsilon_special_rating:
+                M_star = M - f_M * ((M - za) / (f_M - f_za))
+                print('M_star', M_star)
+                if M_star < za:
                     M = za
                     f_M = f_za
-                    print('if 1,', M, f_M)
+                    print('step 2', M, f_M)
+                    continue
+                elif za <= M_star < M:
+                    M = M_star
+                    f_M = self._special_rating_objective(M_star)
+                    print('step 3', M, f_M)
                     continue
                 else:
-                    M_star = M - f_M * ((M - za) / (f_M - f_za))
-                    print('M_star', M_star)
-                    if M_star < za:
-                        M = za
-                        f_M = f_za
-                        print('step 2', M, f_M)
-                        continue
-                    elif za <= M_star < M:
-                        M = M_star
-                        f_M = self._special_rating_objective(M_star)
-                        print('step 3', M, f_M)
-                        continue
-                    else:
-                        step_2_satisfied = True
-                        print('final', M, f_M)
-                        break
-            return M, f_M
+                    step_2_satisfied = True
+                    print('final', M, f_M)
+                    break
+        return M, f_M
 
-        # the third step of the iterative process to find the special rating
+    # the third step of the iterative process to find the special rating
 
-        def _special_rating_step_3(self, M, f_M, Sz):
-            step_3_satisfied = False
-            while step_3_satisfied is False:
+    def _special_rating_step_3(M, f_M, Sz):
+        step_3_satisfied = False
+        while step_3_satisfied is False:
 
-                zb = min([z for z in Sz if z > M])
-                f_zb = self._special_rating_objective(zb)
-                if abs(f_zb - f_M) < self.epsilon_special_rating:
+            zb = min([z for z in Sz if z > M])
+            f_zb = _special_rating_objective(zb)
+            if abs(f_zb - f_M) < epsilon_special_rating:
+                M = zb
+                f_M = f_zb
+            else:
+                M_star = M - f_M * ((zb - M) / (f_zb - f_M))
+                if M_star > zb:
                     M = zb
-                    f_M = f_zb
+                    f_M = _special_rating_objective(M)
+                    continue
+                elif M < M_star <= zb:
+                    M = M_star
+                    f_M = _special_rating_objective(M)
+                    continue
                 else:
-                    M_star = M - f_M * ((zb - M) / (f_zb - f_M))
-                    if M_star > zb:
-                        M = zb
-                        f_M = self._special_rating_objective(M)
-                        continue
-                    elif M < M_star <= zb:
-                        M = M_star
-                        f_M = self._special_rating_objective(M)
-                        continue
-                    else:
-                        step_3_satisfied = True
-                        return M, f_M
+                    step_3_satisfied = True
+                    return M, f_M
 
-        # the fourth step of the iterative process to find the special rating
+    # the fourth step of the iterative process to find the special rating
 
-        def _special_rating_step_4(self, f_M, opponent_ratings, M, Sz):
-            p = 0
-            if abs(f_M) < self.epsilon_special_rating:
-                p = len([o for o in opponent_ratings if abs(M - o) <= 400])
-            if abs(M - self._adjusted_initialized_rating) <= 400:
-                p += 1
-            if p > 0:
-                pass
-            elif p == 0:
-                za = max([s for s in Sz if s < M])
-                zb = min([s for s in Sz if s > M])
-                if za <= self.player.initialized_rating <= zb:
-                    M = self.player.initialized_rating
-                elif self.player.initialized_rating < za:
-                    M = za
-                elif self.player.initialized_rating > zb:
-                    M = zb
-                else:
-                    raise Exception(
-                        'M is outside the range of expected values.')
+    def _special_rating_step_4(f_M, opponent_ratings, M, Sz, adjusted_initialized_rating, initialized_rating):
+        p = 0
+        if abs(f_M) < epsilon_special_rating:
+            p = len([o for o in opponent_ratings if abs(M - o) <= 400])
+        if abs(M - adjusted_initialized_rating) <= 400:
+            p += 1
+        if p > 0:
+            pass
+        elif p == 0:
+            za = max([s for s in Sz if s < M])
+            zb = min([s for s in Sz if s > M])
+            if za <= initialized_rating <= zb:
+                M = initialized_rating
+            elif initialized_rating < za:
+                M = za
+            elif initialized_rating > zb:
+                M = zb
+            else:
+                raise Exception(
+                    'M is outside the range of expected values.')
 
+        M = min(2700, M)
+        return M
+
+    # the overall process to compute the special rating
+
+    def _compute_special_rating(player, tournament_score, opponent_ratings, tournament_games):
+
+        # tournament_games = len(tournament_results)
+        # tournament_score = sum([t[2] for t in tournament_results])
+        # opponent_ratings = [r[1] for r in tournament_results]
+
+        adjusted_initialized_rating, adjusted_score = self._compute_adjusted_initialized_rating_and_score(
+            player, tournament_score)
+
+        M = _special_rating_step_1_compute_M(
+            effective_nr_games, initialized_rating, opponent_ratings, tournament_score, tournament_games)
+
+        f_M = _special_rating_objective(M)
+        Sz = _compute_Sz(opponent_ratings)
+
+        if f_M > epsilon_special_rating:
+            M, f_M = _special_rating_step_2(M, f_M, Sz)
+
+        if f_M < -epsilon_special_rating:
+            M, f_M = _special_rating_step_3(M, f_M, Sz)
+
+        if abs(f_M) < epsilon_special_rating:
+            M = _special_rating_step_4(f_M, opponent_ratings, M, Sz)
             M = min(2700, M)
             return M
 
-        # the overall process to compute the special rating
+    # the value of K is an important component in calculating changes in the standard rating
 
-        def _compute_special_rating(self):
+    def compute_standard_rating_K(rating, time_control_minutes, time_control_increment_seconds, effective_nr_games, nr_games_tournament):
 
-            tournament_games = len(self.tournament_results)
-            tournament_score = sum([t[2] for t in self.tournament_results])
-            opponent_ratings = [r[1] for r in self.tournament_results]
+        K = 800/(effective_nr_games + nr_games_tournament)
 
-            M = self._special_rating_step_1_compute_M(self.player.effective_nr_games, self.player.initialized_rating,
-                                                      opponent_ratings, tournament_score, tournament_games)
-
-            f_M = self._special_rating_objective(M)
-            Sz = self._compute_Sz(opponent_ratings)
-
-            if f_M > self.epsilon_special_rating:
-                M, f_M = self._special_rating_step_2(M, f_M, Sz)
-
-            if f_M < -self.epsilon_special_rating:
-                M, f_M = self._special_rating_step_3(M, f_M, Sz)
-
-            if abs(f_M) < self.epsilon_special_rating:
-                M = self._special_rating_step_4(f_M, opponent_ratings, M, Sz)
-                M = min(2700, M)
-                return M
-
-        # the value of K is an important component in calculating changes in the standard rating
-
-        def compute_standard_rating_K(self, rating, time_control_minutes, time_control_increment_seconds, effective_nr_games, nr_games_tournament):
-
-            K = 800/(effective_nr_games + nr_games_tournament)
-
-            if 30 <= (time_control_minutes + time_control_increment_seconds) <= 65 and rating > 2200:
-                if rating < 2500:
-                    K = (800 * (6.5 - 0.0025*rating))/(effective_nr_games +
-                                                       nr_games_tournament)
-                else:
-                    K = 200/(effective_nr_games +
-                             nr_games_tournament)
-            return K
-
-        # the winning expectancy of a player in a given matchup, under the standard rating logic
-
-        def compute_standard_winning_expectancy(self, rating, opponent_rating):
-            winning_expectancy = 1/(1+10**-((rating - opponent_rating)/400))
-            return winning_expectancy
-
-        # the standard rating function is used for players with N > 8 who have not had either all wins or all losses in every previous rated game
-
-        def _compute_standard_rating(self, bonus=True):
-            sum_swe = sum([self.compute_standard_winning_expectancy(
-                self.player.initialized_rating, r[1]) for r in self.tournament_results])
-
-            K = self.compute_standard_rating_K(
-                self.player.initialized_rating, self.time_control_minutes, self.time_control_increment_seconds, self.player.effective_nr_games, self.nr_games_tournament)
-
-            opponent_ids = [i[0] for i in self.tournament_results]
-            max_nr_games_one_opponent = max(Counter(opponent_ids).values())
-
-            if self.nr_games_tournament < 3 or max_nr_games_one_opponent > 2:
-
-                rating_new = self.player.initialized_rating + \
-                    K*(self.tournament_score - sum_swe)
+        if 30 <= (time_control_minutes + time_control_increment_seconds) <= 65 and rating > 2200:
+            if rating < 2500:
+                K = (800 * (6.5 - 0.0025*rating))/(effective_nr_games +
+                                                   nr_games_tournament)
             else:
-                if bonus:
-                    rating_new = self.player.initialized_rating + K*(self.tournament_score - sum_swe) + max(
-                        0, K*(self.tournament_score - sum_swe) - self.B*np.sqrt(max(self.nr_games_tournament, 4)))
-                else:
-                    rating_new = self.player.initialized_rating + \
-                        K*(self.tournament_score - sum_swe)
+                K = 200/(effective_nr_games +
+                         nr_games_tournament)
+        return K
 
-            return rating_new
+    # the winning expectancy of a player in a given matchup, under the standard rating logic
 
-        # all ratings are subject to a floor of 100, and this may be higher depending on the conditions outlined below
+    def compute_standard_winning_expectancy(self, rating, opponent_rating):
+        winning_expectancy = 1/(1+10**-((rating - opponent_rating)/400))
+        return winning_expectancy
 
-        def compute_rating_floor(self):
+    # the standard rating function is used for players with N > 8 who have not had either all wins or all losses in every previous rated game
 
-            # number of total wins after the tournament
-            Nw = self.player.nr_wins + \
-                len([i for i in self.tournament_results[2] if i == 1])
+    def _compute_standard_rating(self, player, player_tournament_matches, bonus=True):
 
-            # number of total draws after the tournament
-            Nd = self.player.nr_games_played - self.player.nr_wins - self.player.nr_losses + \
-                len([i for i in self.tournament_results[2] if i == 0.5])
+        opponent_ratings = _player_opponent_ratings(
+            player, self.players, player_tournament_matches)
+        nr_tournament_matches = len(player_tournament_matches)
 
-            # number of events in which a player has completed three rating games. defaults to 0 when class initialized, but other value can be specified
-            if len(self.tournament_results) >= 3:
-                self.player.Nr += 1
+        sum_swe = sum([self.compute_standard_winning_expectancy(
+            player.initialized_rating, o) for o in opponent_ratings])
 
-            otb_absolute_rating_floor = min(
-                self.absolute_rating_floor + 4*Nw + 2*Nd + self.player.Nr, 150)
+        K = self.compute_standard_rating_K(player.initialized_rating, self.time_control_minutes,
+                                           self.time_control_increment_seconds, player.effective_nr_games, nr_tournament_matches)
 
-            # a player with an established rating has a rating floor possibly higher than the absolute floor. Higher rating floors exists at 1200 - 2100
-            if self.player.initialized_rating >= 1200 and self.player.established_rating is True:
-                otb_absolute_rating_floor = int(
-                    (self.player.initialized_rating - 200) / 100)*100
+        opponent_ids = [i[0] for i in player_tournament_matches]
 
-            return otb_absolute_rating_floor
+        max_nr_games_one_opponent = max(Counter(opponent_ids).values())
 
-        # function to update the rating of a player after a tournament
+        if nr_games_tournament < 3 or max_nr_games_one_opponent > 2:
 
-        def update_rating(self):
+            rating_new = initialized_rating + \
+                K*(tournament_score - sum_swe)
+        else:
+            if bonus:
+                rating_new = initialized_rating + K*(tournament_score - sum_swe) + max(
+                    0, K*(tournament_score - sum_swe) - B*np.sqrt(max(nr_games_tournament, 4)))
+            else:
+                rating_new = initialized_rating + \
+                    K*(tournament_score - sum_swe)
 
-            if self.player.rating_type == 'standard':
+        return rating_new
+
+    # all ratings are subject to a floor of 100, and this may be higher depending on the conditions outlined below
+
+    def compute_rating_floor(self, player, tournament_games, tournament_wins, tournament_draws, tournament_losses):
+
+        # number of total wins after the tournament
+        Nw = player.nr_wins + tournament_wins
+
+        # number of total draws after the tournament
+        Nd = player.nr_draws + tournament_draws
+
+        # number of events in which a player has completed three rating games. defaults to 0 when class initialized, but other value can be specified
+        if tournament_games >= 3:
+            player.Nr += 1
+
+        rating_floor = min(absolute_rating_floor + 4 *
+                           Nw + 2*Nd + player.Nr, 150)
+
+        # a player with an established rating has a rating floor possibly higher than the absolute floor. Higher rating floors exists at 1200 - 2100
+        if player.initialized_rating >= 1200 and player.established is True:
+            rating_floor = int((player.initialized_rating - 200) / 100)*100
+
+        return rating_floor
+
+    # function to update the rating of a player after a tournament
+
+    def update_player_rating(self, player, player_tournament_matches, nr_tournament_matches, rating_floor):
+
+        # opponent_ratings = _player_opponent_ratings(
+        #     player, self.players, player_tournament_matches)
+        # tournament_score = _player_tournament_score(
+        #     player, player_tournament_matches)
+
+        # Valid individual matches are rated differently. The bonus formula does not apply, and the maximum rating change in a match is 50 points. Rating floors do not apply.
+        if self.individual_match:
+            updated_rating = self._compute_standard_rating(
+                player, player_tournament_matches, bonus=False)
+            updated_rating_bounded = min(max(
+                player.initialized_rating - 50, updated_rating), player.initialized_rating + 50, updated_rating)
+            return updated_rating_bounded
+        else:
+            if player.rating_type == 'standard':
                 updated_rating = self._compute_standard_rating()
             else:
                 updated_rating = self._compute_special_rating()
 
-            opponent_ids = [i[0] for i in self.tournament_results]
-            # an individual match will only be rated if both players involved have an etablished published rating with a maximum difference of 400 points. The bonus formula does not apply, and the maximum rating change in a match is 50 points. Rating floors do not apply.
-            if len(set(opponent_ids)) == 1:
-                if self.player.established_rating is True and abs(self.player.initialized_rating - self.tournament_results[0][1]) <= 400:
-                    updated_rating = self._compute_standard_rating(bonus=False)
-                    updated_rating_bounded = min(max(
-                        self.player.initialized_rating - 50, updated_rating), self.player.initialized_rating + 50, updated_rating)
-                else:
-                    return self.player.initialized_rating
-            else:
-                updated_rating_bounded = max(
-                    updated_rating, self.compute_rating_floor())
-
-            # now update the player's overall number of games played, wins, losses
-            self.player.nr_games_played += len(self.tournament_results)
-            self.player.nr_wins += len(
-                [t for t in self.tournament_results if t[2] == 1])
-            self.player.nr_losses += len(
-                [t for t in self.tournament_results if t[2] == 0])
-
+            updated_rating_bounded = max(updated_rating, rating_floor)
             return updated_rating_bounded
+
+    def run_tournament(self):
+        if self.valid_tournament:
+            updated_info = []
+            for p in self.players:
+
+                player_tournament_matches = _player_tournament_matches(
+                    p, self.tournament_results)
+                nr_tournament_matches, nr_tournament_wins, nr_tournament_draws, nr_tournament_losses = _tournament_stats(
+                    p, player_tournament_matches)
+                rating_floor = self.compute_rating_floor(
+                    p, nr_tournament_matches, nr_tournament_wins, nr_tournament_draws, nr_tournament_losses)
+
+                new_rating = self.update_player_rating(
+                    p, player_tournament_matches, nr_tournament_matches, rating_floor)
+
+                player_tournament_info = (
+                    p.id, self.tournament_date, nr_tournament_matches, nr_tournament_wins, nr_tournament_draws, nr_tournament_losses, new_rating)
+
+                updated_info.append(player_tournament_info)
+
+            return updated_info
+        else:
+            return None
+
+
+# General-purpose functions for computing tournament statistics
+
+def _player_opponent_ratings(player, players, player_tournament_matches):
+    opponent_ratings = []
+    for m in player_tournament_matches:
+        pairing = m[0]
+        if player.id in pairing:
+            opponent_id = [o for o in pairing if o != player.id][0]
+            opponent_rating = [
+                p.initialized_rating for p in players if p.id == opponent_id][0]
+            opponent_ratings.append(opponent_rating)
+
+    return opponent_ratings
+
+
+def _player_tournament_matches(player, tournament_results):
+    player_matches = []
+    for m in tournament_results:
+        if player.id in m[0]:
+            player_matches.append(m)
+    return player_matches
+
+
+def _compute_match_performance(player_id, match):
+    if match[1] is None:
+        score = 0.5
+    elif player_id == match[1]:
+        score = 1
+    else:
+        score = 0
+    return score
+
+
+def _player_tournament_score(player, player_tournament_matches):
+    tournament_score = 0
+    for m in player_tournament_matches:
+        match_score = _compute_match_performance(player.id, m)
+        tournament_score += match_score
+
+    return tournament_score
+
+
+def _tournament_stats(player, player_tournament_matches):
+    nr_games = len(player_tournament_matches)
+    nr_wins = 0
+    nr_draws = 0
+    nr_losses = 0
+    for t in player_tournament_matches:
+        if t[1] is None:
+            nr_draws += 1
+        elif t[1] == player.id:
+            nr_wins += 1
+        else:
+            nr_losses += 1
+
+    return nr_games, nr_wins, nr_draws, nr_losses
+
+
+def _individual_match(players):
+    if len(players) == 2:
+        return True
+    else:
+        return False
