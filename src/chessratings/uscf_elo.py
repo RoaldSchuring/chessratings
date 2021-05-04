@@ -19,13 +19,14 @@ B = 14
 
 class Player:
 
-    def __init__(self, id, rating, nr_games_played, nr_wins, nr_losses, birth_date=date(1990, 1, 1), current_date=date(2021, 1, 1), Nr=0):
+    def __init__(self, id, rating, nr_games_played, nr_wins, nr_losses, nr_tournaments=0, birth_date=date(1990, 1, 1), current_date=date(2021, 1, 1), Nr=0):
         self.id = id
         self.nr_games_played = nr_games_played
         self.nr_wins = nr_wins
         self.nr_draws = nr_games_played - nr_wins - nr_losses
         self.nr_losses = nr_losses
         self.rating = rating
+        self._nr_tournaments = nr_tournaments
         self.birth_date = birth_date
         self.current_date = current_date
         # Nr is the number of events (tournaments) in which a player completed three rated games
@@ -135,8 +136,8 @@ class Tournament:
 
                 playertournament = PlayerTournament(p, self)
                 new_rating = playertournament.update_player_rating()
-                player_tournament_info = (
-                    p.id, self.tournament_date, playertournament.nr_matches, playertournament.nr_wins, playertournament.nr_draws, playertournament.nr_losses, new_rating)
+                player_tournament_info = [p.id, self.tournament_date, playertournament._tournament_nr, playertournament.nr_matches,
+                                          playertournament.nr_wins, playertournament.nr_draws, playertournament.nr_losses, new_rating]
 
                 updated_info.append(player_tournament_info)
 
@@ -153,9 +154,10 @@ class PlayerTournament:
         self._matches = self._player_matches()
         self.score = self._tournament_score()
         self.nr_matches, self.nr_wins, self.nr_draws, self.nr_losses = self._tournament_stats()
-
+        self._tournament_nr = self.player._nr_tournaments + 1
         self._opponents = self._retrieve_opponents()
-        self._opponent_ratings = [o.rating for o in self._opponents]
+        self._opponent_ratings = [
+            o.initialized_rating for o in self._opponents]
         self._adjusted_initialized_rating, self._adjusted_score = self._compute_adjusted_initialized_rating_and_score()
 
     def __iter___(self):
@@ -179,20 +181,16 @@ class PlayerTournament:
                     p for p in self.tournament.players if p.id == opponent_id][0]
                 opponents.append(opponent)
 
-        if opponents is not None:
-            opponents = list(set(opponents))
-        else:
-            opponents = []
-
         return opponents
 
     def _compute_match_performance(self, player_id, match):
-        if match[1] is None:
-            score = 0.5
-        elif player_id == match[1]:
+        if player_id == match[1]:
             score = 1
-        else:
+        elif match[1] in [p.id for p in self.tournament.players]:
             score = 0
+        else:
+            score = 0.5
+
         return score
 
     def _tournament_score(self):
@@ -209,12 +207,13 @@ class PlayerTournament:
         nr_draws = 0
         nr_losses = 0
         for t in self._matches:
-            if t[1] is None:
-                nr_draws += 1
-            elif t[1] == self.player.id:
-                nr_wins += 1
-            else:
+            score = self._compute_match_performance(self.player.id, t)
+            if score == 0:
                 nr_losses += 1
+            elif score == 0.5:
+                nr_draws += 1
+            else:
+                nr_wins += 1
 
         return nr_games, nr_wins, nr_draws, nr_losses
 
@@ -258,8 +257,16 @@ class PlayerTournament:
     # the first step of the iterative algorithm - provides the first estimate of the special rating
 
     def _special_rating_step_1_compute_M(self):
-        M = (self.player.effective_nr_games*self.player.initialized_rating + sum(self._opponent_ratings) + 400 *
-             (2*self.score - self.nr_matches))/(self.player.effective_nr_games + self.nr_matches)
+        # print('effective games', self.player.effective_nr_games)
+        # print('initialized rating', self.player.initialized_rating)
+        # print('sum opponent ratings', sum(self._opponent_ratings))
+        # print('score', self.score)
+        # print('nr_matches', self.nr_matches)
+
+        # M = 2000
+
+        M = (self.player.effective_nr_games*self.player.initialized_rating + sum(self._opponent_ratings) +
+             400 * (2*self.score - self.nr_matches))/(self.player.effective_nr_games + self.nr_matches)
         return M
 
     # the second step of the iterative process to find the special rating
@@ -301,50 +308,55 @@ class PlayerTournament:
     def _special_rating_step_3(self, M, f_M, Sz):
         step_3_satisfied = False
         while step_3_satisfied is False:
+            if f_M < -epsilon_special_rating:
 
-            zb = min([z for z in Sz if z > M])
-            f_zb = self._special_rating_objective(zb)
-            if abs(f_zb - f_M) < epsilon_special_rating:
-                M = zb
-                f_M = f_zb
-            else:
-                M_star = M - f_M * ((zb - M) / (f_zb - f_M))
-                if M_star > zb:
+                zb = min([z for z in Sz if z > M])
+                f_zb = self._special_rating_objective(zb)
+                if abs(f_zb - f_M) < epsilon_special_rating:
                     M = zb
-                    f_M = self._special_rating_objective(M)
-                    continue
-                elif M < M_star <= zb:
-                    M = M_star
-                    f_M = self._special_rating_objective(M)
-                    continue
+                    f_M = f_zb
                 else:
-                    step_3_satisfied = True
-                    return M, f_M
+                    M_star = M - f_M * ((zb - M) / (f_zb - f_M))
+                    if M_star > zb:
+                        M = zb
+                        f_M = self._special_rating_objective(M)
+                        continue
+                    elif M < M_star <= zb:
+                        M = M_star
+                        f_M = self._special_rating_objective(M)
+                        continue
+                    else:
+                        step_3_satisfied = True
+                        return M, f_M
+            else:
+                step_3_satisfied = True
+                return M, f_M
 
     # the fourth step of the iterative process to find the special rating
 
     def _special_rating_step_4(self, f_M, M, Sz):
-        p = 0
-        if abs(f_M) < epsilon_special_rating:
-            p = len([o for o in self._opponent_ratings if abs(M - o) <= 400])
-        if abs(M - self._adjusted_initialized_rating) <= 400:
-            p += 1
-        if p > 0:
-            pass
-        elif p == 0:
-            za = max([s for s in Sz if s < M])
-            zb = min([s for s in Sz if s > M])
-            if za <= self.player.initialized_rating <= zb:
-                M = self.player.initialized_rating
-            elif self.player.initialized_rating < za:
-                M = za
-            elif self.player.initialized_rating > zb:
-                M = zb
-            else:
-                raise Exception(
-                    'M is outside the range of expected values.')
+        if abs(f_M) < -epsilon_special_rating:
+            p = 0
+            if abs(f_M) < epsilon_special_rating:
+                p = len([o for o in self._opponent_ratings if abs(M - o) <= 400])
+            if abs(M - self._adjusted_initialized_rating) <= 400:
+                p += 1
+            if p > 0:
+                return M
 
-        M = min(2700, M)
+            elif p == 0:
+                za = max([s for s in Sz if s < M])
+                zb = min([s for s in Sz if s > M])
+                if za <= self.player.initialized_rating <= zb:
+                    M = self.player.initialized_rating
+                elif self.player.initialized_rating < za:
+                    M = za
+                elif self.player.initialized_rating > zb:
+                    M = zb
+                else:
+                    raise Exception(
+                        'M is outside the range of expected values.')
+
         return M
 
     def _compute_special_rating(self):
@@ -354,15 +366,11 @@ class PlayerTournament:
         Sz = self._compute_Sz()
 
         M, f_M = self._special_rating_step_2(M, f_M, Sz)
+        M, f_M = self._special_rating_step_3(M, f_M, Sz)
+        M = self._special_rating_step_4(f_M, M, Sz)
 
-        if f_M < -epsilon_special_rating:
-            M, f_M = self._special_rating_step_3(M, f_M, Sz)
-
-        if abs(f_M) < epsilon_special_rating:
-            M = self._special_rating_step_4(
-                f_M, M, Sz)
-            M = min(2700, M)
-            return M
+        M = min(2700, M)
+        return M
 
     # the value of K is an important component in calculating changes in the standard rating
 
@@ -388,7 +396,7 @@ class PlayerTournament:
         K = self.compute_standard_rating_K(
             self.player.initialized_rating, self.player.effective_nr_games, self.nr_matches)
 
-        opponent_ids = [o.id for o in self._opponents]
+        opponent_ids = list(set([o.id for o in self._opponents]))
         max_nr_games_one_opponent = max(
             Counter(opponent_ids).values())
 
@@ -472,25 +480,25 @@ def _compute_standard_winning_expectancy(player_rating, opponent_rating):
     return winning_expectancy
 
 
-player_1 = Player('roald', rating=2600, nr_games_played=260,
-                  nr_wins=100, nr_losses=2)
+player_1 = Player('roald', rating=1600, nr_games_played=260,
+                  nr_wins=100, nr_losses=29)
 player_2 = Player('mickelton', rating=None,
                   nr_games_played=0, nr_wins=0, nr_losses=0)
-player_3 = Player('jana', rating=2400, nr_games_played=300,
+player_3 = Player('jana', rating=1400, nr_games_played=300,
                   nr_wins=20, nr_losses=6)
 player_4 = Player('holland beer', rating=800,
                   nr_games_played=300, nr_wins=0, nr_losses=250)
 
 
-results = [(('roald', 'jana'), 'roald'),
-           (('holland beer', 'jana'), 'holland beer'),
-           (('roald', 'holland beer'), 'holland beer'),
-           (('roald', 'holland beer'), 'holland beer')]
+# results = [(('mickelton', 'jana'), 'mickelton'),
+#            (('holland beer', 'jana'), 'holland beer'),
+#            (('mickelton', 'holland beer'), 'holland beer'),
+#            (('roald', 'holland beer'), 'holland beer'),
+#            (('mickelton', 'jana'), 'jana')]
 
-tournament = Tournament(
-    players=[player_1, player_4, player_3], tournament_results=results)
+# tournament = Tournament(
+#     players=[player_1, player_2, player_4, player_3], tournament_results=results)
 
 
-print(tournament.valid_tournament)
-updated_scores = tournament.run_tournament()
-[print(u) for u in updated_scores]
+# updated_scores = tournament.run_tournament()
+# [print(u) for u in updated_scores]
