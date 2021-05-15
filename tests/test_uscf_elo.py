@@ -1,6 +1,6 @@
 import pytest
 from datetime import date
-from uscf_elo import Player
+from chessratings import uscf_elo
 
 
 @pytest.fixture
