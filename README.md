@@ -2,7 +2,7 @@
 
 ## Chessratings
 
-A python implementation of official chess rating systems, specified as used by organizations such a FIDE and the US Chess Federation (USCF) to estimate player strength.
+A python implementation of official chess rating systems, as used by organizations such as the US Chess Federation (USCF) to rate player strength.
 
 Currently available modules are:
 
@@ -50,7 +50,7 @@ The tournament_results must be provided in the following format:
 ```
 [ 
     [ ( player_1_id, player_2_id ), winner_id ],
-    [ ( ... )],
+    [ ( ... ) ],
 ]
 ``` 
 If the match was a draw, winner_id can be set to null (or any value other than one of the two player IDs). Here's an example:
