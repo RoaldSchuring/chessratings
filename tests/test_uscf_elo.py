@@ -1,107 +1,274 @@
 import pytest
+import numpy as np
 from datetime import date
 from chessratings import uscf_elo
 
 
 @pytest.fixture
-def test_player():
-    '''returns a test player with a rating of 1200 and 10 games played  - 8 wins, 1 loss (and thus 1 draw)'''
-    test_player = Player(rating=1200, nr_games_played=10,
-                         nr_wins=8, nr_losses=1)
+def test_player_1():
+    '''returns an unrated test player'''
+    test_player = uscf_elo.Player(
+        id='player_1', rating=None, nr_games_played=0, nr_wins=0, nr_losses=0)
     return test_player
 
 
 @pytest.fixture
-def new_player():
-    '''returns a test player with no existing track record'''
-    new_player = Player(rating=None, nr_games_played=0, nr_wins=0, nr_losses=0)
-    return new_player
+def test_player_2():
+    '''returns a test player with a rating of 1200 and 10 games played  - all wins'''
+    test_player = uscf_elo.Player(
+        id='player_2', rating=1200, nr_games_played=10, nr_wins=10, nr_losses=0)
+    return test_player
 
 
 @pytest.fixture
-def tournament_test_player(test_player):
-    '''returns a test tournament with 6 games against 3 players'''
-    tournament_results = [('opponent_1', 1300, 1), ('opponent_2', 1250, 0.5), ('opponent_3',
-                                                                               1200, 0), ('opponent_3', 1200, 0.5), ('opponent_2', 1250, 0), ('opponent_1', 1300, 1)]
-    tournament = test_player.Tournament(test_player, tournament_results)
+def test_player_3():
+    '''returns a test player with a rating of 1500 and 8 games played - 6 wins and 2 losses '''
+    test_player = uscf_elo.Player(
+        id='player_3', rating=1500, nr_games_played=8, nr_wins=6, nr_losses=2)
+    return test_player
+
+
+@pytest.fixture
+def test_player_4():
+    '''returns a test player with a rating of 2400 and 150 games played'''
+    test_player = uscf_elo.Player(
+        id='player_4', rating=2400, nr_games_played=150, nr_wins=130, nr_losses=12)
+    return test_player
+
+
+@pytest.fixture
+def test_player_5():
+    '''returns a test player with a rating of 2200 and 100 games played'''
+    test_player = uscf_elo.Player(
+        id='player_5', rating=2200, nr_games_played=100, nr_wins=70, nr_losses=23)
+    return test_player
+
+
+@pytest.fixture
+def test_tournament_1(test_player_1, test_player_2, test_player_3, test_player_4):
+    '''returns a test tournament with 6 games between 4 players'''
+
+    players = [test_player_1, test_player_2, test_player_3, test_player_4]
+    tournament_results = [[('player_1', 'player_2'), 'player_1'],
+                          [('player_1', 'player_3'), np.nan],
+                          [('player_2', 'player_3'), 'player_3'],
+                          [('player_4', 'player_2'), np.nan],
+                          [('player_4', 'player_3'), 'player_4'],
+                          [('player_4', 'player_1'), 'player_4']
+                          ]
+
+    tournament = uscf_elo.Tournament(players, tournament_results)
     return tournament
 
 
 @pytest.fixture
-def tournament_new_player(new_player):
-    '''returns a test tournament with 6 games against 3 players'''
-    tournament_results = [('opponent_1', 900, 0), ('opponent_2', 800, 0.5), ('opponent_3',
-                                                                             1200, 0), ('opponent_3', 1200, 0.5), ('opponent_2', 600, 1), ('opponent_1', 750, 0.5)]
-    tournament = new_player.Tournament(new_player, tournament_results)
+def test_tournament_2(test_player_1, test_player_2):
+    '''returns a test tournament that is an invalid individual match'''
+
+    players = [test_player_1, test_player_2]
+    tournament_results = [[('player_1', 'player_2'), 'player_1'],
+                          [('player_1', 'player_2'), np.nan]
+                          ]
+
+    tournament = uscf_elo.Tournament(players, tournament_results)
     return tournament
+
+
+@ pytest.fixture
+def test_tournament_3(test_player_4, test_player_5):
+    '''returns a test tournament that is an valid individual match'''
+
+    players = [test_player_4, test_player_5]
+    tournament_results = [[('player_4', 'player_5'), 'player_5'],
+                          [('player_4', 'player_5'), 'player_4'],
+                          ]
+
+    tournament = uscf_elo.Tournament(players, tournament_results)
+    return tournament
+
+
+@ pytest.fixture
+def test_player_tournament_1(test_player_1, test_tournament_1):
+    '''returns a test tournament that is an valid individual match'''
+    player_tournament = uscf_elo._PlayerTournament(
+        test_player_1, test_tournament_1)
+    return player_tournament
+
+
+@ pytest.fixture
+def test_player_tournament_2(test_player_4, test_tournament_1):
+    '''returns a test tournament that is an valid individual match'''
+    player_tournament = uscf_elo._PlayerTournament(
+        test_player_4, test_tournament_1)
+    return player_tournament
+
+
+@ pytest.fixture
+def test_player_tournament_3(test_player_2, test_tournament_1):
+    '''returns a test tournament that is an valid individual match'''
+    player_tournament = uscf_elo._PlayerTournament(
+        test_player_2, test_tournament_1)
+    return player_tournament
+
+
+'''
+__________________________________________________________________________________________________
+
+'''
+
+
+# test whether the tag for an established player is being assigned correctly
+def test_determine_established_rating(test_player_1, test_player_5):
+    established_rating_test_player_1 = test_player_1.determine_established_rating()
+    established_rating_test_player_5 = test_player_5.determine_established_rating()
+    assert established_rating_test_player_1 is False
+    assert established_rating_test_player_5 is True
 
 
 # test the function that returns a rating based on age, covering all three possibilities
-@pytest.mark.parametrize("birth_year, tournament_year, expected", [
+@ pytest.mark.parametrize("birth_year, current_year, expected", [
     (1990, 2021, 1300),
     (2001, 2021, 1000),
     (2020, 2021, 100)
 ])
-def test_age_based_rating(test_player, birth_year, tournament_year, expected):
-    test_player.birth_date = date(birth_year, 1, 1)
-    test_player.tournament_end_date = date(tournament_year, 1, 1)
-    age_based_rating = test_player._compute_age_based_rating()
+def test_age_based_rating(test_player_1, birth_year, current_year, expected):
+    test_player_1.birth_date = date(birth_year, 1, 1)
+    test_player_1.current_date = date(current_year, 1, 1)
+    age_based_rating = test_player_1._compute_age_based_rating()
     assert age_based_rating == expected
 
 
 # test the rating initialization function for a new player (for whom rating will be initialized based on age)
-def test_initialize_rating(new_player, test_player):
-    initialized_rating_new_player = new_player.initialize_rating()
-    initialized_rating_test_player = test_player.initialize_rating()
-    assert initialized_rating_new_player == 1300
-    assert initialized_rating_test_player == 1200
-
-# test whether the tag for an established player is being assigned correctly
-
-
-def test_determine_established_rating(new_player, test_player):
-    established_rating_new_player = new_player.determine_established_rating()
-    established_rating_test_player = test_player.determine_established_rating()
-    assert established_rating_new_player is False
-    assert established_rating_test_player is False
+def test_initialize_rating(test_player_1, test_player_2, test_player_3, test_player_4):
+    initialized_rating_test_player_1 = test_player_1.initialize_rating()
+    initialized_rating_test_player_2 = test_player_2.initialize_rating()
+    initialized_rating_test_player_3 = test_player_3.initialize_rating()
+    initialized_rating_test_player_4 = test_player_4.initialize_rating()
+    assert initialized_rating_test_player_1 == 1300
+    assert initialized_rating_test_player_2 == 1200
+    assert initialized_rating_test_player_3 == 1500
+    assert initialized_rating_test_player_4 == 2400
 
 
 # test the effective number of games calculation for a range of different scenarios
-@pytest.mark.parametrize("rating, games_played, expected", [
-    (900, 0, 0),
-    (1200, 10, 10),
-    (1300, 20, 14),
-    (2400, 40, 40),
-    (2400, 60, 50)
-])
-def test_compute_effective_nr_games(test_player, rating, games_played, expected):
-    test_player.rating = rating
-    test_player.nr_games_played = games_played
-    test_player.initialized_rating = test_player.initialize_rating()
-    effective_nr_games = test_player.compute_effective_nr_games()
-    effective_nr_games_truncated = int(effective_nr_games)
-    assert effective_nr_games_truncated == expected
+def test_compute_effective_nr_games(test_player_1, test_player_2, test_player_4):
+    effective_nr_games_test_player_1 = int(
+        test_player_1.compute_effective_nr_games())
+    effective_nr_games_test_player_2 = int(
+        test_player_2.compute_effective_nr_games())
+    effective_nr_games_test_player_4 = int(
+        test_player_4.compute_effective_nr_games())
+
+    assert effective_nr_games_test_player_1 == 0
+    assert effective_nr_games_test_player_2 == 10
+    assert effective_nr_games_test_player_4 == 50
 
 
 # test the categorization function tht assigns a rating type to each player
-@pytest.mark.parametrize("games_played, wins, losses, expected", [
-    (6, 0, 5, 'special-new'),
-    (9, 9, 0, 'special-only-wins'),
-    (9, 0, 9, 'special-only-losses'),
-    (10, 7, 1, 'standard')
+def test_rating_type(test_player_1, test_player_2, test_player_4):
+
+    rating_type_test_player_1 = test_player_1.compute_rating_type()
+    rating_type_test_player_2 = test_player_2.compute_rating_type()
+    rating_type_test_player_4 = test_player_4.compute_rating_type()
+
+    assert rating_type_test_player_1 == 'special-new'
+    assert rating_type_test_player_2 == 'special-only-wins'
+    assert rating_type_test_player_4 == 'standard'
+
+
+'''
+TOURNAMENT TESTS
+'''
+
+
+def test_individual_match(test_tournament_1, test_tournament_3):
+    tournament_1_match = test_tournament_1._verify_individual_match()
+    tournament_3_match = test_tournament_3._verify_individual_match()
+    assert tournament_1_match is False
+    assert tournament_3_match is True
+
+
+def test_tournament_validity(test_tournament_1, test_tournament_2, test_tournament_3):
+    tournament_1_validity = test_tournament_1._valid_tournament()
+    tournament_2_validity = test_tournament_2._valid_tournament()
+    tournament_3_validity = test_tournament_3._valid_tournament()
+
+    assert tournament_1_validity is True
+    assert tournament_2_validity is False
+    assert tournament_3_validity is True
+
+
+def test_tournament_estimated_ratings(test_tournament_1, test_player_2, test_player_3, test_player_4):
+
+    for p in test_tournament_1.players:
+        if p.id == 'player_1':
+            assert p.estimated_rating == 1600
+        elif p.id == 'player_2':
+            assert p.estimated_rating == test_player_2.estimated_rating
+        elif p.id == 'player_3':
+            assert p.estimated_rating == test_player_3.estimated_rating
+        elif p.id == 'player_4':
+            assert p.estimated_rating == test_player_4.estimated_rating
+        else:
+            continue
+
+
+'''
+PLAYER TOURNAMENT TESTS
+'''
+
+
+def test_player_tournament_opponents(test_player_tournament_1, test_player_tournament_2):
+    player_1_opponents = test_player_tournament_1._opponents
+    player_4_opponents = test_player_tournament_2._opponents
+
+    player_1_opponent_ids = [o.id for o in player_1_opponents]
+    player_4_opponent_ids = [o.id for o in player_4_opponents]
+
+    assert set(player_1_opponent_ids) == set(
+        ['player_2', 'player_3', 'player_4'])
+    assert set(player_4_opponent_ids) == set(
+        ['player_1', 'player_2', 'player_3'])
+
+
+def test_compute_tournament_score(test_player_tournament_1, test_player_tournament_2):
+    score_1 = test_player_tournament_1._tournament_score()
+    score_2 = test_player_tournament_2._tournament_score()
+    assert score_1 == 1.5
+    assert score_2 == 2.5
+
+
+def test_tournament_stats(test_player_tournament_1, test_player_tournament_2):
+    nr_games_1, nr_wins_1, nr_draws_1, nr_losses_1 = test_player_tournament_1._tournament_stats()
+    nr_games_2, nr_wins_2, nr_draws_2, nr_losses_2 = test_player_tournament_2._tournament_stats()
+    assert (nr_games_1, nr_wins_1, nr_draws_1, nr_losses_1) == (3, 1, 1, 1)
+    assert (nr_games_2, nr_wins_2, nr_draws_2, nr_losses_2) == (3, 2, 1, 0)
+
+
+def test_compute_adjusted_initialized_rating_and_score(test_player_tournament_1, test_player_tournament_3):
+    adjusted_initialized_rating_1, adjusted_score_1 = test_player_tournament_1._compute_adjusted_initialized_rating_and_score()
+    adjusted_initialized_rating_2, adjusted_score_2 = test_player_tournament_3._compute_adjusted_initialized_rating_and_score()
+
+    assert (adjusted_initialized_rating_1, adjusted_score_1) == (1600, 1.5)
+    assert (adjusted_initialized_rating_2, adjusted_score_2) == (800, 10.5)
+
+
+# test the function that returns a rating based on age, covering all three possibilities
+@ pytest.mark.parametrize("player_rating, opponent_rating, expected", [
+    (1000, 1500, 0),
+    (1200, 1200, 0.5),
+    (1200, 1300, 0.375),
+    (1500, 1000, 1)
 ])
-def test_rating_type(test_player, games_played, wins, losses, expected):
-    test_player.nr_games_played = games_played
-    test_player.nr_wins = wins
-    test_player.nr_losses = losses
-    rating_type = test_player.compute_rating_type()
-    assert rating_type == expected
+def test_compute_provisional_winning_expectancy(test_player_tournament_1, player_rating, opponent_rating, expected):
+    pwe = test_player_tournament_1._compute_provisional_winning_expectancy(
+        player_rating, opponent_rating)
+    assert pwe == expected
 
 
-# test whether the total tournament score is being calculated correctly in the test tournament we created
-def tournament_test_player_score(tournament_test_player, tournament_new_player):
-    assert tournament_test_player.tournament_score == 3
-    assert tournament_new_player.tournament_score == 2.5
+'''
+
+
 
 
 # test the PWE calculation that is part of the special rating procedure
@@ -114,20 +281,6 @@ def test_compute_pwe(tournament_test_player, rating, opponent_rating, expected):
     pwe = tournament_test_player._compute_pwe(rating, opponent_rating)
     assert pwe == expected
 
-
-# test the initial rating and score calculation for the tournament
-@pytest.mark.parametrize("rating_type, expected_initialized_rating, expected_score", [
-    ('special-new', 1200, 8),
-    ('special-only-wins', 800, 13),
-    ('special-only-losses', 1600, 3),
-    ('standard', 1200, 8)
-])
-def test_adjusted_initialized_rating_and_score(test_player, tournament_test_player, rating_type, expected_initialized_rating, expected_score):
-    test_player.rating_type = rating_type
-    tournament_test_player.player = test_player
-    adjusted_initialized_rating, adjusted_score = tournament_test_player._compute_adjusted_initialized_rating_and_score()
-    assert adjusted_initialized_rating == expected_initialized_rating
-    assert adjusted_score == expected_score
 
 
 # test the special rating objective function. for a special rating estimate of 1200 we should see an output of -0.375 for the objective fn
@@ -235,3 +388,4 @@ def test_update_rating(tournament_test_player, tournament_new_player):
     updated_rating_new_player = tournament_new_player.update_rating()
     assert abs(updated_rating_test_player - 1221) < 1
     assert abs(updated_rating_new_player - 841) < 1
+'''
