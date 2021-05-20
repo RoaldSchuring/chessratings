@@ -310,9 +310,6 @@ class _PlayerTournament:
     # the first step of the iterative algorithm - provides the first estimate of the special rating
     def _special_rating_step_1_compute_M(self):
 
-        # M = 2000
-        # for players with 0 games played, initialize the rating estimate with effective number of games =1
-
         M = (self.player.effective_nr_games*self._adjusted_initialized_rating + sum(self._opponent_ratings) +
              400 * (2*self.score - self.nr_matches))/(self.player.effective_nr_games + self.nr_matches)
         return M
