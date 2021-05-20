@@ -73,15 +73,15 @@ tournament_results = tournament.run()
 print(tournament_results)
 ```
 
-```
+Tournament results are presented as: 
+player id, tournament date, tournament number, number of tournament games, number of wins, number of draws, number of losses, updated rating
 
 ```
-
-
-
-
-
-
+[
+    ['player_1', datetime.date(2021, 5, 20), 1, 3, 1, 1, 1, 1584.0954259202883],
+    ['player_2', datetime.date(2021, 5, 20), 1, 3, 1, 1, 1, 1517.178456181353]
+]
+```
 
 ## Contributing
 
