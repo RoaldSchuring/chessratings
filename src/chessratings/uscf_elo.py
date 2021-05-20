@@ -22,7 +22,7 @@ B = 14
 # A player is a participant in a tournament and needs to be initialized
 class Player:
 
-    def __init__(self, id, rating, nr_games_played, nr_wins, nr_losses, nr_tournaments=0, birth_date=date(1990, 1, 1), current_date=date(2021, 1, 1), Nr=0):
+    def __init__(self, id, rating, nr_games_played=100, nr_wins=50, nr_losses=50, nr_tournaments=0, birth_date=date(1990, 1, 1), current_date=date(2021, 1, 1), Nr=0):
         self.id = id
         self.nr_games_played = nr_games_played
         self.nr_wins = nr_wins
@@ -175,6 +175,7 @@ class Tournament:
                 player_tournament_info = [p.id, self.tournament_date, playertournament._tournament_nr, playertournament.nr_matches,
                                           playertournament.nr_wins, playertournament.nr_draws, playertournament.nr_losses, new_rating]
 
+                p.rating = new_rating
                 updated_info.append(player_tournament_info)
 
             return updated_info
